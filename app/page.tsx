@@ -113,7 +113,7 @@ export default function GenioLingoApp() {
         config: { systemInstruction: SYSTEM_PROMPT }
       });
 
-      const genioResponse = { role: "genio", text: response.text };
+      const genioResponse = { role: "genio", text: response.text || "Hubo un pequeño cortocircuito en mi memoria, ¿puedes repetirlo?" };
       const finalMessages = [...updatedMessages, genioResponse];
       setMessages(finalMessages);
 
