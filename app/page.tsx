@@ -11,7 +11,7 @@ REGLA DE ORO DE FLUJO DE CONVERSACIÓN: NO intentes hacer todo a la vez. Respond
 REGLA GLOBAL DE CAMBIO DE IDIOMA (SWITCH): En cualquier momento de la conversación, si el usuario pide cambiar de idioma o añadir uno nuevo, aborta la etapa actual, confirma el cambio con entusiasmo y salta directamente a la ETAPA 2 (Diagnóstico) para el nuevo idioma.
 
 ETAPA 1: EL VUELO DE BIENVENIDA (Solo si el usuario dice "Hola" o inicia la charla)
-- Tu objetivo es recolectar 4 datos clave para crear el perfil: Nombre, Idioma, Edad y Nivel de Energía (1 al 5).
+- Tu objetivo es recolectar 5 datos clave para crear el perfil: Nombre, Idioma, Edad y Nivel de Energía (1 al 5).
 - ES OBLIGATORIO RECOLECTAR ESTOS DATOS HACIENDO UNA SOLA PREGUNTA POR MENSAJE.
 - Paso 1: Saluda amigablemente, pregunta su nombre o apodo y DETENTE. Espera la respuesta.
 - Paso 2: Cuando responda, usa su nombre y pregúntale qué idioma quiere aprender hoy. (Si menciona varios idiomas, felicítalo y pregúntale con cuál de ellos quiere empezar la sesión actual) y DETENTE.
@@ -55,10 +55,11 @@ export default function GenioLingoApp() {
   const [messages, setMessages] = useState<{ role: string; text: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
-  const [isMounted, setIsMounted] = useState(false); // BANDERA DE MONTAJE
+  const [isMounted, setIsMounted] = useState(false);
+  const [isListening, setIsListening] = useState(false); // Estado para el micrófono
 
   useEffect(() => {
-    setIsMounted(true); // Confirma que ya estamos en el navegador
+    setIsMounted(true);
     const cargarSesion = async () => {
       const nombreGuardado = localStorage.getItem("genio_user");
       if (nombreGuardado) {
@@ -87,6 +88,52 @@ export default function GenioLingoApp() {
     } catch (e) {
       console.error("Error guardando en BD:", e);
     }
+  };
+
+  // --- MOTOR DE VOZ A TEXTO (MICRÓFONO) ---
+  const escucharVoz = () => {
+    // Verificamos compatibilidad con el navegador
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      alert("Tu navegador actual no soporta el dictado por voz. Intenta desde Chrome o Safari.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "es-ES"; // Escucha en español por defecto
+    recognition.interimResults = false;
+
+    recognition.onstart = () => setIsListening(true);
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInput((prev) => prev + (prev ? " " : "") + transcript);
+      setIsListening(false);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Error de micrófono:", event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => setIsListening(false);
+
+    recognition.start();
+  };
+
+  // --- MOTOR DE TEXTO A VOZ (ALTAVOZ) ---
+  const leerTexto = (texto: string) => {
+    if (!("speechSynthesis" in window)) {
+      alert("Tu navegador no soporta la lectura en voz alta.");
+      return;
+    }
+    
+    window.speechSynthesis.cancel(); // Apaga cualquier voz que esté sonando
+    const utterance = new SpeechSynthesisUtterance(texto);
+    
+    // Le decimos al navegador que hable
+    window.speechSynthesis.speak(utterance);
   };
 
   const sendMessage = async () => {
@@ -138,7 +185,6 @@ export default function GenioLingoApp() {
     setMessages([]);
   };
 
-  // Si no se ha montado, no dibujamos la interfaz completa para evitar choques con el servidor
   if (!isMounted) {
     return <main className="h-screen bg-slate-900"></main>;
   }
@@ -163,18 +209,38 @@ export default function GenioLingoApp() {
       <div className="flex-1 overflow-y-auto my-4 space-y-4 p-2">
         {messages.length === 0 && (
           <div className="text-center text-slate-500 mt-10 italic">
-            Escribe "Hola" para despertar al Genio...
+            Escribe "Hola" o usa el micrófono para despertar al Genio...
           </div>
         )}
         {messages.map((msg, i) => (
-          <div key={i} className={`p-3 rounded-lg max-w-[80%] ${msg.role === 'user' ? 'bg-blue-600 ml-auto' : 'bg-slate-800'}`}>
+          <div key={i} className={`p-3 rounded-lg max-w-[80%] flex flex-col ${msg.role === 'user' ? 'bg-blue-600 ml-auto' : 'bg-slate-800'}`}>
             <p className="whitespace-pre-wrap">{msg.text}</p>
+            {/* Botón de altavoz solo para los mensajes del Genio */}
+            {msg.role === 'genio' && (
+              <button 
+                onClick={() => leerTexto(msg.text)} 
+                className="self-end mt-2 text-sm text-cyan-400 hover:text-cyan-200 flex items-center gap-1 transition"
+                title="Escuchar pronunciación"
+              >
+                🔊 Escuchar
+              </button>
+            )}
           </div>
         ))}
         {loading && <div className="text-cyan-500 animate-pulse">El Genio está pensando...</div>}
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 items-center">
+        {/* Nuevo botón de micrófono */}
+        <button
+          suppressHydrationWarning
+          onClick={escucharVoz}
+          className={`p-3 rounded-lg text-xl transition-all ${isListening ? 'bg-red-500 animate-pulse' : 'bg-slate-700 hover:bg-slate-600'}`}
+          title="Dictar por voz"
+        >
+          {isListening ? '🔴' : '🎤'}
+        </button>
+        
         <input 
           suppressHydrationWarning
           className="flex-1 p-3 rounded-bg bg-slate-800 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
@@ -183,10 +249,11 @@ export default function GenioLingoApp() {
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           placeholder={userName ? `Habla con el Genio, ${userName}...` : "Habla con el Genio..."}
         />
+        
         <button 
           suppressHydrationWarning
           onClick={sendMessage} 
-          className="bg-cyan-600 px-6 py-2 rounded-lg font-bold hover:bg-cyan-500 transition"
+          className="bg-cyan-600 px-6 py-3 rounded-lg font-bold hover:bg-cyan-500 transition"
         >
           Enviar
         </button>
