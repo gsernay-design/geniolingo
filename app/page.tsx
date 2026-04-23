@@ -7,35 +7,33 @@ import { doc, setDoc, getDoc } from "firebase/firestore";
 const SYSTEM_PROMPT = `
 Eres GenioLingo, el tutor políglota inteligente de la familia de Giovanni. Tu misión es enseñar el idioma que el usuario elija con lógica de ingeniería, no repetición mecánica.
 
-REGLA DE ORO DE AUDIO (NUEVA E IMPORTANTE): Si el usuario envía un AUDIO, debes escucharlo con atención extrema. Tu respuesta DEBE incluir una sección de "Análisis de Pronunciación" donde evalúes:
+REGLA DE ORO DE AUDIO: Si el usuario envía un AUDIO, debes escucharlo con atención extrema. Tu respuesta DEBE incluir una sección de "Análisis de Pronunciación" donde evalúes:
 1. Claridad de los fonemas.
 2. Acento y entonación (pitch accent si es japonés, ritmo si es inglés o francés, etc.).
-3. Consejos específicos para mejorar la mecánica vocal (ej. "suaviza la 'u' final", "coloca la lengua detrás de los dientes superiores").
+3. Consejos específicos para mejorar la mecánica vocal (ej. "suaviza la 'u' final").
 
 REGLA GLOBAL DE CAMBIO DE IDIOMA (SWITCH): En cualquier momento, si el usuario pide cambiar de idioma, aborta la etapa actual, confirma el cambio y salta a la ETAPA 2 para el nuevo idioma.
 
 ETAPA 1: EL VUELO DE BIENVENIDA (Solo al inicio de la charla)
-- Tu objetivo es recolectar 4 datos clave: Nombre, Idioma, Edad y Nivel de Energía (1 al 5).
+- Tu objetivo es recolectar 5 datos clave: Nombre, Idioma, Edad, Aficiones y Nivel de Energía (1 al 5).
 - ES OBLIGATORIO RECOLECTAR ESTOS DATOS HACIENDO UNA SOLA PREGUNTA POR MENSAJE. Espera la respuesta antes de pasar al siguiente dato.
 
 ETAPA 2: EL DIAGNÓSTICO
-- OBLIGATORIO: Ajusta tu tono según su edad (Infantil: lúdico, mágico, usa emojis; Senior: muy respetuoso, pausado, claro, cálido y paciente; Adulto: lógico, directo).
+- OBLIGATORIO: Ajusta tu tono según su edad (Infantil: lúdico, mágico; Senior: respetuoso, cálido; Adulto: lógico, directo).
 - Evalúa su nivel con 3 preguntas situacionales. Haz UNA SOLA PREGUNTA por mensaje. Espera la respuesta.
 
 ETAPA 3: EL MENÚ DE TIEMPO
-- Felicítalo por su nivel.
-- Ofrécele el menú: Misión Relámpago (5 min), Lección Maestra (15-30 min) o Consulta al Genio.
+- Felicítalo por su nivel y ofrécele: Misión Relámpago (5 min), Lección Maestra (15-30 min) o Consulta al Genio.
 
 ETAPA 4: LA LECCIÓN
 - Ejecuta la lección. Nunca des traducciones simples; explica la "ingeniería" gramatical detrás.
 - Usa fonética evolutiva en corchetes: Niños [u-den-parts], Adultos [ai-am-che-kin].
-- Integra sus intereses (ej. si es ingeniero, usa ejemplos de circuitos; si es niño, cuentos y magia; si es senior, historias clásicas o sus gustos).
 
 ETAPA 5: CIERRE Y MURO FAMILIAR
 - Otorga "GenioGemas" simbólicas como recompensa.
 - Genera un bloque para el "Muro Familiar" con esta estructura exacta:
   [MURO FAMILIAR]
-  Título en Español: "¡Victoria! [Nombre] completó un reto de [Idioma] 🌍"
+  Título: "¡Victoria! [Nombre] completó un reto de [Idioma] 🌍"
   Original: [Frase aprendida]
   Traducción: [Traducción al español]
   Fonética: [Pronunciación]
@@ -44,20 +42,17 @@ ETAPA 5: CIERRE Y MURO FAMILIAR
 `;
 
 export default function GenioLingoApp() {
-  // --- ESTADOS DE LA APP ---
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<{ role: string; text: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
-  // --- ESTADOS DE AUDIO (NUEVOS) ---
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // --- HIDRATACIÓN Y SESIÓN ---
   useEffect(() => {
     setIsMounted(true);
     const cargarSesion = async () => {
@@ -74,8 +69,8 @@ export default function GenioLingoApp() {
     cargarSesion();
   }, []);
 
-  // --- LÓGICA DE GRABACIÓN (MediaRecorder) ---
-  const iniciarGrabacion = async () => {
+  const iniciarGrabacion = async (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault(); // Evita comportamientos extraños del navegador móvil
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -99,16 +94,15 @@ export default function GenioLingoApp() {
     }
   };
 
-  const detenerGrabacion = () => {
+  const detenerGrabacion = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      // Detener todos los tracks del stream para apagar el icono de micro del navegador
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
     }
   };
 
-  // Conversor de Audio a Base64 para la API
   const blobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -117,16 +111,13 @@ export default function GenioLingoApp() {
     });
   };
 
-  // --- TEXT TO SPEECH (El Genio Habla) ---
   const leerTexto = (texto: string) => {
     if (!("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(texto);
-    // Intentar detectar idioma o dejar por defecto
     window.speechSynthesis.speak(utterance);
   };
 
-// --- ENVÍO DE MENSAJE (MULTIMODAL CORREGIDO) ---
   const sendMessage = async () => {
     if (!input.trim() && !audioBlob) return;
 
@@ -139,36 +130,39 @@ export default function GenioLingoApp() {
 
     try {
       const apiKey = (process.env.NEXT_PUBLIC_GEMINI_API_KEY || "").trim();
-      
-      // CORRECCIÓN 1: El nuevo SDK pide un objeto con la llave, no un string suelto
       const ai = new GoogleGenAI({ apiKey: apiKey });
 
-      // Preparamos las partes del mensaje actual (texto + posible audio)
       let currentParts: any[] = [{ text: textoUsuario }];
 
       if (audioBlob) {
         const base64Audio = await blobToBase64(audioBlob);
         currentParts.push({
-          inlineData: {
-            mimeType: "audio/webm",
-            data: base64Audio
-          }
+          inlineData: { mimeType: "audio/webm", data: base64Audio }
         });
       }
 
-      // Preparamos el historial completo en el formato estricto que pide Google
-      const historialContexto = updatedMessages.map(m => ({
-        role: m.role === "genio" ? "model" : "user",
-        parts: [{ text: m.text }]
-      }));
+      // --- FILTRO SANITARIO DE HISTORIAL ---
+      // Evita que Gemini reciba dos roles de "user" seguidos si hubo un error antes
+      const historialContexto: any[] = [];
+      let ultimoRol = "";
 
-      // Reemplazamos el último mensaje (que solo era texto) por nuestro paquete completo con audio
-      historialContexto.pop();
-      historialContexto.push({ role: "user", parts: currentParts });
+      updatedMessages.forEach(m => {
+        if (m.role === "error") return; // Ignoramos los mensajes de error
+        
+        const roleGoogle = m.role === "genio" ? "model" : "user";
+        // Solo agregamos si el rol se alterna correctamente
+        if (roleGoogle !== ultimoRol) {
+          historialContexto.push({ role: roleGoogle, parts: [{ text: m.text }] });
+          ultimoRol = roleGoogle;
+        }
+      });
 
-      // CORRECCIÓN 2: Usamos el método generateContent directamente desde los modelos
+      // Aseguramos que el último mensaje sea nuestro "currentParts" (con audio si lo hay)
+      historialContexto.pop(); // Sacamos el último texto plano
+      historialContexto.push({ role: "user", parts: currentParts }); // Metemos el paquete completo
+
       const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash", // El modelo ideal para audio
+        model: "gemini-1.5-flash",
         contents: historialContexto,
         config: { systemInstruction: SYSTEM_PROMPT }
       });
@@ -178,9 +172,8 @@ export default function GenioLingoApp() {
       const finalHistory = [...updatedMessages, genioResponse];
       
       setMessages(finalHistory);
-      setAudioBlob(null); // Limpiar el audio usado
+      setAudioBlob(null);
 
-      // Guardar en Firebase
       if (userName) {
         await setDoc(doc(db, "usuarios", userName.toLowerCase().trim()), {
           nombre: userName,
@@ -199,6 +192,7 @@ export default function GenioLingoApp() {
 
     } catch (error) {
       console.error("Error API:", error);
+      // Solo agregamos el error visual, NO eliminamos el audioBlob para que puedan reintentar
       setMessages(prev => [...prev, { role: "error", text: "Perdona, tuve un error de conexión." }]);
     } finally {
       setLoading(false);
@@ -230,7 +224,6 @@ export default function GenioLingoApp() {
         </div>
       </header>
 
-      {/* ÁREA DE CHAT */}
       <div className="flex-1 overflow-y-auto my-4 space-y-4 p-2 scrollbar-hide">
         {messages.length === 0 && (
           <div className="text-center text-slate-500 mt-20 italic animate-pulse">
@@ -238,7 +231,7 @@ export default function GenioLingoApp() {
           </div>
         )}
         {messages.map((msg, i) => (
-          <div key={i} className={`p-4 rounded-2xl max-w-[85%] shadow-lg ${msg.role === 'user' ? 'bg-cyan-700 ml-auto rounded-tr-none' : 'bg-slate-800 rounded-tl-none'}`}>
+          <div key={i} className={`p-4 rounded-2xl max-w-[85%] shadow-lg ${msg.role === 'user' ? 'bg-cyan-700 ml-auto rounded-tr-none' : msg.role === 'error' ? 'bg-red-900/50 border border-red-500 text-red-200 mx-auto' : 'bg-slate-800 rounded-tl-none'}`}>
             <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>
             {msg.role === 'genio' && (
               <button onClick={() => leerTexto(msg.text)} className="mt-3 text-xs text-cyan-400 font-bold flex items-center gap-1 hover:text-white transition">
@@ -250,21 +243,22 @@ export default function GenioLingoApp() {
         {loading && <div className="text-cyan-500 text-xs font-mono animate-bounce">Genio procesando audio/texto...</div>}
         {audioBlob && !loading && (
           <div className="bg-red-900/30 border border-red-500/50 p-2 rounded-lg text-xs text-center animate-pulse">
-            🎤 Audio listo para enviar. Dale a "Enviar".
+            🎤 Audio listo para enviar. Dale a "ENVIAR".
           </div>
         )}
       </div>
 
-      {/* CONTROLES DE ENTRADA */}
       <div className="flex gap-2 items-center bg-slate-800 p-2 rounded-2xl border border-slate-700">
+        {/* BOTÓN CON ARMADURA ANTI-NAVEGADOR */}
         <button
-          onMouseDown={iniciarGrabacion}
-          onMouseUp={detenerGrabacion}
-          onTouchStart={iniciarGrabacion}
-          onTouchEnd={detenerGrabacion}
-          className={`p-4 rounded-xl transition-all ${isRecording ? 'bg-red-600 scale-110 shadow-[0_0_20px_rgba(220,38,38,0.5)]' : 'bg-slate-700 hover:bg-slate-600'}`}
+          onPointerDown={iniciarGrabacion}
+          onPointerUp={detenerGrabacion}
+          onPointerCancel={detenerGrabacion}
+          onContextMenu={(e) => e.preventDefault()} 
+          style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none', touchAction: 'none' }}
+          className={`p-4 rounded-xl transition-all select-none ${isRecording ? 'bg-red-600 scale-110 shadow-[0_0_20px_rgba(220,38,38,0.5)]' : 'bg-slate-700 hover:bg-slate-600'}`}
         >
-          {isRecording ? '⏹️' : '🎤'}
+          {isRecording ? '🔴' : '🎤'}
         </button>
         
         <input 
