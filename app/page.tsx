@@ -77,7 +77,6 @@ export default function GenioLingoApp() {
     cargarSesion();
   }, []);
 
-  // --- AUTO-ENVÍO AL DETECTAR NUEVO AUDIO ---
   useEffect(() => {
     if (audioBlob && shouldAutoSend.current) {
       sendMessage();
@@ -106,7 +105,7 @@ export default function GenioLingoApp() {
   const detenerGrabacion = (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (mediaRecorderRef.current && isRecording) {
-      shouldAutoSend.current = true; // Marcamos para que se envíe solo al procesar el blob
+      shouldAutoSend.current = true;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
@@ -141,15 +140,27 @@ export default function GenioLingoApp() {
     const updatedMessages = [...mensajesLimpios, userMessage];
     setMessages(updatedMessages);
     setInput("");
-    setAudioBlob(null); // Limpiamos inmediatamente para evitar bucles
+    setAudioBlob(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: (process.env.NEXT_PUBLIC_GEMINI_API_KEY || "").trim() });
+      // --- CORRECCIÓN CRÍTICA DE SINTAXIS API ---
+      const apiKey = (process.env.NEXT_PUBLIC_GEMINI_API_KEY || "").trim();
+      const genAI = new GoogleGenAI(apiKey); // Pasamos el string directo
+      const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        systemInstruction: SYSTEM_PROMPT 
+      });
+
       let currentParts: any[] = [{ text: textoUsuario }];
 
       if (currentAudio) {
         const base64Audio = await blobToBase64(currentAudio);
-        currentParts.push({ inlineData: { mimeType: currentAudio.type.split(';')[0] || 'audio/webm', data: base64Audio } });
+        currentParts.push({ 
+          inlineData: { 
+            mimeType: currentAudio.type.split(';')[0] || 'audio/webm', 
+            data: base64Audio 
+          } 
+        });
       }
 
       const historialContexto: any[] = [];
@@ -165,18 +176,18 @@ export default function GenioLingoApp() {
       historialContexto.pop();
       historialContexto.push({ role: "user", parts: currentParts });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: historialContexto,
-        config: { systemInstruction: SYSTEM_PROMPT }
+      // Ejecución con el nuevo formato de la librería
+      const result = await model.generateContent({
+        contents: historialContexto
       });
 
-      const genioText = response.text || "¿Podrías repetirlo?";
+      const response = result.response;
+      const genioText = response.text() || "¿Podrías repetirlo?";
       const genioResponse = { role: "genio", text: genioText };
       const finalHistory = [...updatedMessages, genioResponse];
       
       setMessages(finalHistory);
-      leerTexto(genioText); // AUTO-PLAY: El genio habla solo
+      leerTexto(genioText);
 
       if (userName) {
         await setDoc(doc(db, "usuarios", userName.toLowerCase().trim()), {
@@ -190,7 +201,8 @@ export default function GenioLingoApp() {
         });
       }
     } catch (error: any) {
-      setMessages(prev => [...prev, { role: "error", text: "Error de conexión. Intenta de nuevo." }]);
+      console.error("Error Real:", error);
+      setMessages(prev => [...prev, { role: "error", text: `Error de conexión: ${error.message || 'Intenta de nuevo'}` }]);
     } finally { setLoading(false); }
   };
 
@@ -219,7 +231,7 @@ export default function GenioLingoApp() {
         {messages.length === 0 && <div className="text-center text-slate-600 mt-20 italic text-sm">Di "Hola" para despertar al Genio...</div>}
         {messages.map((msg, i) => (
           <div key={i} className={`p-3 rounded-2xl max-w-[85%] shadow-md ${msg.role === 'user' ? 'bg-cyan-800 ml-auto rounded-tr-none' : msg.role === 'error' ? 'bg-red-950/50 border border-red-900 text-red-200 text-[10px] mx-auto' : 'bg-slate-800 rounded-tl-none'}`}>
-            <p className="text-sm leading-relaxed">{msg.text}</p>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
             {msg.role === 'genio' && (
               <button onClick={() => leerTexto(msg.text)} className="mt-2 text-lg hover:scale-110 transition-transform" title="Volver a escuchar">🔊</button>
             )}
@@ -248,9 +260,13 @@ export default function GenioLingoApp() {
           placeholder="Escribe o mantén presionado..."
         />
         
-        {input.trim() && (
-          <button onClick={sendMessage} className="bg-cyan-600 p-3 rounded-2xl font-bold hover:bg-cyan-500 transition active:scale-95">OK</button>
-        )}
+        <button 
+          onClick={sendMessage} 
+          disabled={loading}
+          className="bg-cyan-600 px-4 py-3 rounded-2xl font-bold hover:bg-cyan-500 transition active:scale-95 text-xs"
+        >
+          {loading ? '...' : 'ENVIAR'}
+        </button>
       </div>
       <p className="text-[8px] text-center text-slate-700 mt-2">Mantén presionado para hablar. Suelta para enviar.</p>
     </main>
