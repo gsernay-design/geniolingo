@@ -143,13 +143,9 @@ export default function GenioLingoApp() {
     setAudioBlob(null);
 
     try {
-      // --- CORRECCIÓN CRÍTICA DE SINTAXIS API ---
+      // --- LA SINTAXIS EXACTA PARA EL NUEVO SDK ---
       const apiKey = (process.env.NEXT_PUBLIC_GEMINI_API_KEY || "").trim();
-      const genAI = new GoogleGenAI(apiKey); // Pasamos el string directo
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        systemInstruction: SYSTEM_PROMPT 
-      });
+      const ai = new GoogleGenAI({ apiKey: apiKey }); 
 
       let currentParts: any[] = [{ text: textoUsuario }];
 
@@ -176,13 +172,16 @@ export default function GenioLingoApp() {
       historialContexto.pop();
       historialContexto.push({ role: "user", parts: currentParts });
 
-      // Ejecución con el nuevo formato de la librería
-      const result = await model.generateContent({
-        contents: historialContexto
+      // Ejecución directa desde el objeto instanciado 'ai'
+      const response = await ai.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: historialContexto,
+        config: {
+          systemInstruction: SYSTEM_PROMPT
+        }
       });
 
-      const response = result.response;
-      const genioText = response.text() || "¿Podrías repetirlo?";
+      const genioText = response.text || "¿Podrías repetirlo?";
       const genioResponse = { role: "genio", text: genioText };
       const finalHistory = [...updatedMessages, genioResponse];
       
@@ -201,8 +200,9 @@ export default function GenioLingoApp() {
         });
       }
     } catch (error: any) {
-      console.error("Error Real:", error);
-      setMessages(prev => [...prev, { role: "error", text: `Error de conexión: ${error.message || 'Intenta de nuevo'}` }]);
+      console.error("Error Real de API:", error);
+      // Ahora sí imprimirá el motivo exacto si llega a fallar
+      setMessages(prev => [...prev, { role: "error", text: `Error: ${error.message || 'Error desconocido de conexión'}` }]);
     } finally { setLoading(false); }
   };
 
