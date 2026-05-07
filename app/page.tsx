@@ -4,7 +4,6 @@ import { GoogleGenAI } from "@google/genai";
 import { db } from "../lib/firebase"; 
 import { doc, setDoc, getDoc } from "firebase/firestore";
 
-// --- TU PROMPT DE 9 ETAPAS INTEGRADO ---
 const SYSTEM_PROMPT = `
 Eres GenioLingo, el tutor políglota inteligente de la familia de Giovanni. Tu misión es enseñar el idioma que el usuario elija con lógica de ingeniería.
  
@@ -55,6 +54,7 @@ export default function GenioLingoApp() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<{ role: string; text: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingText, setLoadingText] = useState("El Genio te escucha..."); // Nuevo estado dinámico
   const [userName, setUserName] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
@@ -134,6 +134,8 @@ export default function GenioLingoApp() {
     if (!currentInput && !currentAudio) return;
 
     setLoading(true);
+    setLoadingText("El Genio está pensando...");
+    
     const textoUsuario = currentInput || "🎤 [Nota de voz]";
     const userMessage = { role: "user", text: textoUsuario };
     
@@ -144,9 +146,8 @@ export default function GenioLingoApp() {
     setAudioBlob(null);
 
     try {
-      // --- LA SINTAXIS EXACTA PARA EL NUEVO SDK ---
       const apiKey = (process.env.NEXT_PUBLIC_GEMINI_API_KEY || "").trim();
-      const ai = new GoogleGenAI({ apiKey: apiKey }); 
+      const ai = new GoogleGenAI({ apiKey: apiKey });
 
       let currentParts: any[] = [{ text: textoUsuario }];
 
@@ -173,16 +174,39 @@ export default function GenioLingoApp() {
       historialContexto.pop();
       historialContexto.push({ role: "user", parts: currentParts });
 
-      // Ejecución directa desde el objeto instanciado 'ai'
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: historialContexto,
-        config: {
-          systemInstruction: SYSTEM_PROMPT
-        }
-      });
+      // --- BUCLE DE REINTENTO INTELIGENTE (EXPONENTIAL BACKOFF) ---
+      let result;
+      let retries = 0;
+      const maxRetries = 3;
 
-      const genioText = response.text || "¿Podrías repetirlo?";
+      while (retries < maxRetries) {
+        try {
+          result = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: historialContexto,
+            config: { systemInstruction: SYSTEM_PROMPT }
+          });
+          break; // Si tiene éxito, rompemos el bucle
+        } catch (apiError: any) {
+          const errorMsg = apiError.message?.toLowerCase() || "";
+          // Verificamos si es un error temporal (503, 429, high demand)
+          const isRetryable = errorMsg.includes("503") || errorMsg.includes("429") || errorMsg.includes("high demand") || errorMsg.includes("quota");
+          
+          if (isRetryable && retries < maxRetries - 1) {
+            retries++;
+            // Le damos magia al error para que las niñas no se asusten
+            setLoadingText(`Servidores ocupados. El Genio busca otra ruta mágica... (Intento ${retries})`);
+            // Esperamos 3 segundos, luego 6 segundos, etc.
+            await new Promise(resolve => setTimeout(resolve, 3000 * retries));
+          } else {
+            // Si no es un error temporal o se acabaron los intentos, lanzamos el error
+            throw apiError;
+          }
+        }
+      }
+
+      const response = result?.response;
+      const genioText = response?.text() || "¿Podrías repetirlo?";
       const genioResponse = { role: "genio", text: genioText };
       const finalHistory = [...updatedMessages, genioResponse];
       
@@ -202,9 +226,12 @@ export default function GenioLingoApp() {
       }
     } catch (error: any) {
       console.error("Error Real de API:", error);
-      // Ahora sí imprimirá el motivo exacto si llega a fallar
-      setMessages(prev => [...prev, { role: "error", text: `Error: ${error.message || 'Error desconocido de conexión'}` }]);
-    } finally { setLoading(false); }
+      // Solo mostramos el error si el Genio realmente no pudo después de todos sus intentos mágicos
+      setMessages(prev => [...prev, { role: "error", text: "El portal mágico está inestable. ¡Intenta enviar tu mensaje otra vez!" }]);
+    } finally { 
+      setLoading(false); 
+      setLoadingText("El Genio te escucha..."); // Reseteamos el texto
+    }
   };
 
   const resetApp = () => {
@@ -238,7 +265,7 @@ export default function GenioLingoApp() {
             )}
           </div>
         ))}
-        {loading && <div className="text-cyan-500 text-[10px] font-mono animate-pulse">El Genio te escucha...</div>}
+        {loading && <div className="text-cyan-500 text-[10px] font-mono animate-pulse">{loadingText}</div>}
       </div>
 
       <div className="flex gap-2 items-center bg-slate-800/50 p-2 rounded-3xl border border-slate-700">
