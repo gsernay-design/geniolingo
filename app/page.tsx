@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "../lib/firebase"; 
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, collection, addDoc } from "firebase/firestore"; // <-- NUEVOS IMPORT DE FIREBASE
 
 const SYSTEM_PROMPT = `
 Eres GenioLingo, el tutor políglota inteligente de la familia de Giovanni. Tu misión es enseñar el idioma que el usuario elija con lógica de ingeniería.
@@ -48,13 +48,20 @@ ETAPA 8: LA LECCIÓN
  
 ETAPA 9: CIERRE
 - Resumen corto, otorga "GenioGemas" y despedida cálida.
+- MUY IMPORTANTE: Genera un bloque exacto con este formato para guardar el progreso:
+  [MURO FAMILIAR]
+  Título: "¡Victoria! [Nombre] completó un reto de [Idioma] 🌍"
+  Original: [Frase aprendida]
+  Traducción: [Traducción al español]
+  Fonética: [Pronunciación]
+  Contexto: [Breve elogio]
 `;
 
 export default function GenioLingoApp() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<{ role: string; text: string }[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadingText, setLoadingText] = useState("El Genio te escucha..."); // Nuevo estado dinámico
+  const [loadingText, setLoadingText] = useState("El Genio te escucha...");
   const [userName, setUserName] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
@@ -154,10 +161,7 @@ export default function GenioLingoApp() {
       if (currentAudio) {
         const base64Audio = await blobToBase64(currentAudio);
         currentParts.push({ 
-          inlineData: { 
-            mimeType: currentAudio.type.split(';')[0] || 'audio/webm', 
-            data: base64Audio 
-          } 
+          inlineData: { mimeType: currentAudio.type.split(';')[0] || 'audio/webm', data: base64Audio } 
         });
       }
 
@@ -174,7 +178,6 @@ export default function GenioLingoApp() {
       historialContexto.pop();
       historialContexto.push({ role: "user", parts: currentParts });
 
-      // --- BUCLE DE REINTENTO INTELIGENTE (EXPONENTIAL BACKOFF) ---
       let result;
       let retries = 0;
       const maxRetries = 3;
@@ -186,26 +189,58 @@ export default function GenioLingoApp() {
             contents: historialContexto,
             config: { systemInstruction: SYSTEM_PROMPT }
           });
-          break; // Si tiene éxito, rompemos el bucle
+          break; 
         } catch (apiError: any) {
           const errorMsg = apiError.message?.toLowerCase() || "";
-          // Verificamos si es un error temporal (503, 429, high demand)
           const isRetryable = errorMsg.includes("503") || errorMsg.includes("429") || errorMsg.includes("high demand") || errorMsg.includes("quota");
           
           if (isRetryable && retries < maxRetries - 1) {
             retries++;
-            // Le damos magia al error para que las niñas no se asusten
             setLoadingText(`Servidores ocupados. El Genio busca otra ruta mágica... (Intento ${retries})`);
-            // Esperamos 3 segundos, luego 6 segundos, etc.
             await new Promise(resolve => setTimeout(resolve, 3000 * retries));
           } else {
-            // Si no es un error temporal o se acabaron los intentos, lanzamos el error
             throw apiError;
           }
         }
       }
 
       let genioText = result?.text || "¿Podrías repetirlo?";
+
+      // --- 🕵️‍♂️ INTERCEPTOR DEL MURO FAMILIAR ---
+      if (genioText.includes("[MURO FAMILIAR]")) {
+        try {
+          // 1. Dividimos el mensaje para separar la charla normal de los datos del muro
+          const partes = genioText.split("[MURO FAMILIAR]");
+          const charlaGenio = partes[0].trim();
+          const datosMuro = partes[1]; // Aquí está todo lo que sigue a la etiqueta
+
+          // 2. Extraemos la información usando expresiones regulares (Regex)
+          const titulo = datosMuro.match(/Título:\s*(.*)/i)?.[1] || "Nuevo Logro Desbloqueado";
+          const original = datosMuro.match(/Original:\s*(.*)/i)?.[1] || "";
+          const traduccion = datosMuro.match(/Traducción:\s*(.*)/i)?.[1] || "";
+          const fonetica = datosMuro.match(/Fonética:\s*(.*)/i)?.[1] || "";
+          const contexto = datosMuro.match(/Contexto:\s*(.*)/i)?.[1] || "";
+
+          // 3. Enviamos el paquete a Firebase (Colección: muro_publico)
+          await addDoc(collection(db, "muro_publico"), {
+            usuario: userName || "Familia",
+            fecha: new Date(),
+            timestamp: Date.now(), // Para ordenar del más nuevo al más viejo
+            titulo,
+            original,
+            traduccion,
+            fonetica,
+            contexto
+          });
+
+          // 4. Modificamos el texto que verá el usuario para que sea bonito
+          genioText = charlaGenio + "\n\n🌟 *¡Tu logro ha sido publicado en el Muro Familiar!*";
+        } catch (error) {
+          console.error("Error procesando el Muro Familiar:", error);
+        }
+      }
+      // --- FIN DEL INTERCEPTOR ---
+
       const genioResponse = { role: "genio", text: genioText };
       const finalHistory = [...updatedMessages, genioResponse];
       
@@ -225,11 +260,10 @@ export default function GenioLingoApp() {
       }
     } catch (error: any) {
       console.error("Error Real de API:", error);
-      // Solo mostramos el error si el Genio realmente no pudo después de todos sus intentos mágicos
       setMessages(prev => [...prev, { role: "error", text: "El portal mágico está inestable. ¡Intenta enviar tu mensaje otra vez!" }]);
     } finally { 
       setLoading(false); 
-      setLoadingText("El Genio te escucha..."); // Reseteamos el texto
+      setLoadingText("El Genio te escucha..."); 
     }
   };
 
