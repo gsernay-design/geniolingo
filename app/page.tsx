@@ -205,8 +205,7 @@ export default function GenioLingoApp() {
         }
       }
 
-      const response = result?.response;
-      const genioText = response?.text() || "¿Podrías repetirlo?";
+      let genioText = result?.text || "¿Podrías repetirlo?";
       const genioResponse = { role: "genio", text: genioText };
       const finalHistory = [...updatedMessages, genioResponse];
       
